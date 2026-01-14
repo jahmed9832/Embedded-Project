@@ -1,0 +1,214 @@
+#include <Keypad.h>
+const uint8_t ROWS = 4;
+const uint8_t COLS = 4;
+char keys[ROWS][COLS] = {
+  { '1', '2', '3', 'A' },
+  { '4', '5', '6', 'B' },
+  { '7', '8', '9', 'C' },
+  { '*', '0', '#', 'D' }
+};
+
+uint8_t colPins[COLS] = { 9, 10, 11, 12 }; // Pins connected to C1, C2, C3, C4
+uint8_t rowPins[ROWS] = { 14, 15, 16, 17 }; // Pins connected to R1, R2, R3, R4
+
+Keypad keypad = Keypad(makeKeymap(keys), rowPins, colPins, ROWS, COLS);
+
+
+int DS1_pin = 4;
+int STCP1_pin = 3;
+int SHCP1_pin = 2;
+int dig[4] = {5, 6, 7, 8};
+int digitNum = 0;
+
+int yellowLed=18;
+int greenLed=19;
+int redLed=20;
+int ledIdx = 0;
+int leds[3] = {redLed, greenLed, yellowLed};
+
+unsigned static long timer = 0;
+
+bool state= false;
+bool isIn = false;
+bool isLast = false;
+
+
+String inString = "12";
+long inTime = 0;
+
+
+int digits [10][7]{
+  {1,1,1,1,1,1,0}, // digit 0
+  {0,1,1,0,0,0,0}, // digit 1
+  {1,1,0,1,1,0,1}, // digit 2
+  {1,1,1,1,0,0,1}, // digit 3
+  {0,1,1,0,0,1,1}, // digit 4
+  {1,0,1,1,0,1,1}, // digit 5
+  {1,0,1,1,1,1,1}, // digit 6
+  {1,1,1,0,0,0,0}, // digit 7
+  {1,1,1,1,1,1,1}, // digit 8
+  {1,1,1,1,0,1,1}  // digit 9
+};
+
+
+int digCnt(int num){
+   int cnt = 0;
+   while(num > 0){
+      num/=10;
+      cnt++;
+   }
+   return cnt;
+}
+
+void showDig(int num){
+     if(digCnt(num) > 4){
+       return;
+     }
+     if(num == 0){
+       clearDig();
+       digitalWrite(dig[3], HIGH);
+       DisplayDigit(0);
+       return;
+     }
+    
+    int idx = 3;
+
+    while(num > 0){
+       clearDig();
+       int d = num%10;
+       digitalWrite(dig[idx], HIGH);
+       DisplayDigit(d);
+       delay(10);
+       digitalWrite(dig[idx], LOW);
+      
+       idx--;
+       num = num/10;
+    }
+
+     
+}
+
+ISR(TIMER1_OVF_vect)
+{
+  TCNT1 = 40535; // Timer Preloading
+  showDig(digitNum);
+}
+
+void setup() {
+  Serial.begin(9600);
+  pinMode(yellowLed,OUTPUT);
+  pinMode(greenLed,OUTPUT);
+  pinMode(redLed,OUTPUT);
+  pinMode(DS1_pin, OUTPUT);
+  pinMode(STCP1_pin, OUTPUT);
+  pinMode(SHCP1_pin, OUTPUT);
+  for(int x = 0; x < 4; x++){
+     pinMode(dig[x], OUTPUT);
+  }
+
+  TCCR1A = 0;           // Init Timer1A
+  TCCR1B = 0;           // Init Timer1B
+  TCCR1B |= B00000011;  // Prescaler = 64
+  TCNT1 = 40535;        // Timer Preloading
+  TIMSK1 |= B00000001;  // Enable Timer Overflow Interrupt
+ 
+}
+
+
+void loop() {
+   
+  char key = keypad.getKey();
+  if (key == '*') {           
+    state = true;
+    inTime = inString.toInt();
+    timer = millis();     
+  }
+  if(key == 'A'){
+     isIn = true;
+     inString = "";
+  }
+
+  while(isIn){
+    char keyTmp = keypad.getKey();
+    if(keyTmp){
+      if(keyTmp == '#'){
+         isIn = false;
+         break;
+      }
+      inString+=keyTmp;
+    }
+  }
+
+  while(state){
+      bool ledState = HIGH;
+      while(millis() - timer < inTime*1000){
+         char keyTmp = keypad.getKey();
+          if(keyTmp == '*') {
+              state = false;
+              break;
+          }
+         digitNum = inTime - (millis() - timer)/1000;
+         if(isLast){
+          Serial.println(inTime*1000 - (millis() - timer));
+            if((inTime*100 - (millis() - timer)/10) % 20 == 0 && ledIdx != 2){
+               ledState = !ledState;
+            }
+            digitalWrite(leds[ledIdx], ledState);
+         }
+         else{
+          digitalWrite(leds[ledIdx], ledState);
+           if(inTime - (millis() - timer)/1000 <= 3){
+              //Serial.println("last");
+              isLast = true;
+           }
+         }
+      }
+
+      if(!state){
+        ledIdx = 0;
+        isLast = false;
+        for(int x = 0; x < 3; x++){
+            digitalWrite(leds[x], LOW);
+        }
+       
+        digitNum = 0;
+        clearDig();
+        break;
+      }
+
+      digitalWrite(leds[ledIdx], LOW);
+      ledIdx++;
+      if(ledIdx == 3){
+         ledIdx = 0;
+      }
+      isLast = false;
+      timer = millis();
+  }
+  
+  }
+
+void DisplayDigit(int Digit)
+{
+    digitalWrite(STCP1_pin,LOW);
+    for (int i = 7; i>=0; i--)
+   {
+    digitalWrite(SHCP1_pin,LOW);
+    if (digits[Digit][i]==1) digitalWrite(DS1_pin, LOW); 
+    if (digits[Digit][i]==0) digitalWrite(DS1_pin, HIGH);
+    digitalWrite(SHCP1_pin,HIGH);
+   }
+   
+   digitalWrite(STCP1_pin, HIGH); 
+}
+
+void clearDig(){
+   digitalWrite(STCP1_pin,LOW);
+    for (int i = 7; i>=0; i--)
+   {
+    digitalWrite(SHCP1_pin,LOW);
+    digitalWrite(DS1_pin, HIGH); 
+    digitalWrite(SHCP1_pin,HIGH);
+   }
+   
+   digitalWrite(STCP1_pin, HIGH); 
+}
